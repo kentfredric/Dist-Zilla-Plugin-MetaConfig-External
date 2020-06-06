@@ -3,7 +3,41 @@ use strict;
 use warnings;
 
 use Dist::Zilla 6.015 ();    # No earlier support for dist.pl that works, sorry
-use lib './lib';
+use Path::Tiny qw(path);
+use Scope::Guard qw(guard);
+
+my $libdir;
+my $devlibdir;
+
+BEGIN {
+  $libdir            = path('./lib')->realpath->stringify;
+  $devlibdir         = path('./dev-inc')->realpath->stringify;
+  *_ensure_devel_inc = sub {
+    require lib;
+    if ( not grep { $_ eq $libdir } @INC ) {
+      lib->import($libdir);
+    }
+    if ( not grep { $_ eq $devlibdir } @INC ) {
+      lib->import($devlibdir);
+    }
+  };
+  _ensure_devel_inc();
+}
+
+BEGIN {
+  # Oh god: https://github.com/rjbs/Config-MVP/issues/14
+  require Config::MVP::Assembler;
+  my $old         = \&Config::MVP::Assembler::sequence;
+  my $replacement = sub {
+    _ensure_devel_inc();
+    my $guard = guard { _ensure_devel_inc() };
+    $old->(@_);
+  };
+  {
+    no warnings 'redefine';
+    *Config::MVP::Assembler::sequence = $replacement;
+  }
+}
 
 BEGIN {
   if ( !$ENV{NO_GIT} and -e '.git' and -d '.git' ) {
@@ -50,11 +84,27 @@ my (@distmeta) = (
   copyright_holder => 'Kent Fredric <kentfredric@gmail.com>',
   main_module      => 'lib/Dist/Zilla/Plugin/MetaConfig/External.pm',
 );
+my (%dzil_inc_prereqs) = (
+
+  # Perl::Critic::Utils
+  'B::Keywords', => 0,
+
+  # Perl::MinimumVersion
+  'PPIx::Regexp' => 0,
+
+  # Data::DPath
+  'Class::XSAccessor' => 0,
+
+  # Dist::Zilla::Plugin::TravisCI
+  'YAML' => 0,
+
+);
 my (%prereqs) = (
   develop => {
     requires => {
       'Dist::Zilla' => 6.015,
-    }
+    },
+    suggests => \%dzil_inc_prereqs,
   }
 );
 
